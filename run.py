@@ -15,21 +15,45 @@ def get(file):
     header_written = False
 
     coin_list = cryptocompare.get_coin_list(format=False)
+    i = 0
     for symbol in coin_list:
-
+        i += 1
+        print('Processing ' + symbol + ' ' + str(i) + '/' + str(len(coin_list)))
+        symbolTotal = 0
         try:
-            histoday_price_data = get_histoday_price(symbol)['Data']
-            for row in histoday_price_data:
-                row['date_string'] = datetime.datetime.fromtimestamp(row['time']).strftime('%Y-%m-%d %H:%M:%S')
-                row['symbol'] = symbol
-            
-            if not header_written:
-                save_csv([histoday_price_data[0]], file)
-                header_written = True
+            histohour_price_data = get_histohour_price(symbol)['Data']
 
-            append_csv(histoday_price_data, file)
+            while (True):
+                # if one closing price is not 0, request more data
+                more_data = False
+
+                lastKey = len(histohour_price_data) - 1
+                del histohour_price_data[lastKey]
+
+                for row in histohour_price_data:
+                    row['date_string'] = datetime.datetime.fromtimestamp(row['time']).strftime('%Y-%m-%d %H:%M:%S')
+                    row['symbol'] = symbol
+                    if float(row['close']) > 0:
+                        more_data = True
+                
+                if (more_data == False):
+                    break
+
+                if not header_written:
+                    save_csv(histohour_price_data, file)
+                    header_written = True
+                else:
+                    append_csv(histohour_price_data, file)
+
+                symbolTotal += len(histohour_price_data)
+
+                ts = int(histohour_price_data[0]['time'])
+                histohour_price_data = get_histohour_price(symbol, CURR, ts)['Data']
         except:
-            pprint.pprint('Error with symbol ' + str(symbol))
+            print('Error with symbol ' + str(symbol))
+
+        print('Wrote ' + str(symbolTotal) + ' lines for ' + symbol)
+        print('')
 
 def save_csv(data, file):
     pprint.pprint(data)
@@ -43,8 +67,6 @@ def save_csv(data, file):
             wr.writerow(list(row.values()))
 
 def append_csv(data, file):
-    pprint.pprint(data)
-    pprint.pprint(file)
     with open(file, 'a') as csv_file:
         wr = csv.writer(csv_file, delimiter=',')
         for row in data:
@@ -60,6 +82,7 @@ URL_PRICE_MULTI = 'https://min-api.cryptocompare.com/data/pricemulti?fsyms={}&ts
 URL_PRICE_MULTI_FULL = 'https://min-api.cryptocompare.com/data/pricemultifull?fsyms={}&tsyms={}'
 URL_HIST_PRICE = 'https://min-api.cryptocompare.com/data/pricehistorical?fsym={}&tsyms={}&ts={}'
 URL_HISTODAY_PRICE = 'https://min-api.cryptocompare.com/data/histoday?fsym={}&tsym={}'
+URL_HISTOHOUR_PRICE = 'https://min-api.cryptocompare.com/data/histohour?fsym={}&tsym={}&toTs={}&limit=2000'
 URL_AVG = 'https://min-api.cryptocompare.com/data/generateAvg?fsym={}&tsym={}&markets={}'
 
 # FIELDS
@@ -120,6 +143,12 @@ def get_historical_price(coin, curr=CURR, timestamp=time.time()):
 
 def get_histoday_price(coin, curr=CURR):
     result = query_cryptocompare(URL_HISTODAY_PRICE.format(coin, format_parameter(curr)))
+    return result
+
+def get_histohour_price(coin, curr=CURR, timestamp=time.time()):
+    url = URL_HISTOHOUR_PRICE.format(coin, format_parameter(curr), int(timestamp))
+    pprint.pprint(url)
+    result = query_cryptocompare(url)
     return result
 
 def get_avg(coin, curr, markets):
