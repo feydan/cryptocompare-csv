@@ -1,6 +1,7 @@
 import click
 import csv
 import cryptocompare
+import math
 import pprint
 
 # Cryptocompare code
@@ -11,8 +12,17 @@ import datetime
 
 @click.command()
 @click.option('--file', default='results.csv', help='File name to save to.')
-def get(file):
+@click.option('--last-file', default='', help='Inspects the last timestamp for incremental results from the last run.')
+def get(file, last_file):
     header_written = False
+
+    fromTimestamp = 0
+    if (last_file != ''):
+        fromTimestamp = get_max_ts_from_file(last_file)
+
+    toTimestamp = time.time()
+
+    limit = get_limit(fromTimestamp, toTimestamp)
 
     coin_list = cryptocompare.get_coin_list(format=False)
     i = 0
@@ -21,7 +31,7 @@ def get(file):
         print('Processing ' + symbol + ' ' + str(i) + '/' + str(len(coin_list)))
         symbolTotal = 0
         try:
-            histohour_price_data = get_histohour_price(symbol)['Data']
+            histohour_price_data = get_histohour_price(symbol, CURR, toTimestamp, limit)['Data']
 
             while (True):
                 # if one closing price is not 0, request more data
@@ -47,8 +57,15 @@ def get(file):
 
                 symbolTotal += len(histohour_price_data)
 
-                ts = int(histohour_price_data[0]['time'])
-                histohour_price_data = get_histohour_price(symbol, CURR, ts)['Data']
+                toTs = int(histohour_price_data[0]['time'])
+                # regenerate limit
+                limit = get_limit(fromTimestamp, toTs)
+
+                # check if we should fetch more
+                if (limit <= 0):
+                    break
+
+                histohour_price_data = get_histohour_price(symbol, CURR, toTs, limit)['Data']
         except:
             print('Error with symbol ' + str(symbol))
 
@@ -72,6 +89,33 @@ def append_csv(data, file):
         for row in data:
             wr.writerow(list(row.values()))
 
+def get_max_ts_from_file(file):
+    max_ts = 0
+    with open(file, 'r') as csv_file:
+        reader = csv.reader(csv_file, delimiter=',')
+        row_count = 0
+        for row in reader:
+            row_count += 1
+
+            # skip the header
+            if (row_count == 1):
+                continue;
+
+            ts = int(row[0])
+            if (ts > max_ts):
+                max_ts = ts
+
+            # only look at the first 2001 rows
+            if row_count >= 2001:
+                break
+
+    return max_ts
+
+def get_limit(fromTs, toTs):
+    limit = (toTs - fromTs) / 3600 - 1
+    if (limit > 2000):
+        limit = 2000
+    return math.floor(limit)
 
 # Cryptocompare code
 
@@ -82,7 +126,7 @@ URL_PRICE_MULTI = 'https://min-api.cryptocompare.com/data/pricemulti?fsyms={}&ts
 URL_PRICE_MULTI_FULL = 'https://min-api.cryptocompare.com/data/pricemultifull?fsyms={}&tsyms={}'
 URL_HIST_PRICE = 'https://min-api.cryptocompare.com/data/pricehistorical?fsym={}&tsyms={}&ts={}'
 URL_HISTODAY_PRICE = 'https://min-api.cryptocompare.com/data/histoday?fsym={}&tsym={}'
-URL_HISTOHOUR_PRICE = 'https://min-api.cryptocompare.com/data/histohour?fsym={}&tsym={}&toTs={}&limit=2000'
+URL_HISTOHOUR_PRICE = 'https://min-api.cryptocompare.com/data/histohour?fsym={}&tsym={}&toTs={}&limit={}'
 URL_AVG = 'https://min-api.cryptocompare.com/data/generateAvg?fsym={}&tsym={}&markets={}'
 
 # FIELDS
@@ -145,8 +189,8 @@ def get_histoday_price(coin, curr=CURR):
     result = query_cryptocompare(URL_HISTODAY_PRICE.format(coin, format_parameter(curr)))
     return result
 
-def get_histohour_price(coin, curr=CURR, timestamp=time.time()):
-    url = URL_HISTOHOUR_PRICE.format(coin, format_parameter(curr), int(timestamp))
+def get_histohour_price(coin, curr=CURR, timestamp=time.time(), limit=2000):
+    url = URL_HISTOHOUR_PRICE.format(coin, format_parameter(curr), int(timestamp), limit)
     pprint.pprint(url)
     result = query_cryptocompare(url)
     return result
